@@ -84,7 +84,14 @@ export default function Scvaa() {
 
   const handleChange = e => {
     const { name, value } = e.target
-    setForm(f => ({ ...f, [name]: value, ...(name === 'decision_conformite' ? { motifs_inconformite: [] } : {}) }))
+    setForm(f => ({
+      ...f,
+      [name]: value,
+      ...(name === 'decision_conformite' ? {
+        motifs_inconformite: [],
+        envoi_sms: value === 'NON_CONFORME'
+      } : {})
+    }))
   }
   const toggleMotif = m => setForm(f => ({
     ...f, motifs_inconformite: f.motifs_inconformite.includes(m)
@@ -232,17 +239,19 @@ export default function Scvaa() {
               </div>
             )}
 
-            {/* Option d'envoi SMS */}
-            <div className="flex items-center gap-2 cursor-pointer" onClick={() => setForm(f => ({ ...f, envoi_sms: !f.envoi_sms }))}>
-              {form.envoi_sms ? (
-                <CheckSquare size={18} className="text-ci-green" />
-              ) : (
-                <Square size={18} className="text-neutral-400" />
-              )}
-              <span className="text-sm text-neutral-700">
-                Envoyer notification SMS au propriétaire
-              </span>
-            </div>
+            {/* Option d'envoi SMS — visible uniquement pour NON_CONFORME */}
+            {form.decision_conformite === 'NON_CONFORME' && (
+              <div className="flex items-center gap-2 cursor-pointer" onClick={() => setForm(f => ({ ...f, envoi_sms: !f.envoi_sms }))}>
+                {form.envoi_sms ? (
+                  <CheckSquare size={18} className="text-ci-green" />
+                ) : (
+                  <Square size={18} className="text-neutral-400" />
+                )}
+                <span className="text-sm text-neutral-700">
+                  Envoyer notification SMS au propriétaire
+                </span>
+              </div>
+            )}
 
             <div className="flex flex-wrap gap-3 justify-end pt-2">
               <Button type="button" variant="ghost" onClick={() => setActive(null)}>Annuler</Button>
