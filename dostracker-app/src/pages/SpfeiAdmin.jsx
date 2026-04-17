@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { CheckCircle, Send, Save, ChevronLeft } from 'lucide-react'
+import { useAuth } from '../context/AuthContext'
 import { getDossiers, updateSpfeiAdmin, envoyerDossier } from '../api/dossiers'
 import DossierCard from '../components/DossierCard'
 import DossierDetail from '../components/DossierDetail'
@@ -16,6 +17,7 @@ const INIT = {
 }
 
 export default function SpfeiAdmin() {
+  const { user } = useAuth()
   const [dossiers, setDossiers] = useState([])
   const [active,   setActive]   = useState(null)
   const [form,     setForm]     = useState(INIT)
