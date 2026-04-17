@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { CheckCircle, Send, Save, ChevronLeft } from 'lucide-react'
+import { Check, CheckCircle, Send, Save, ChevronLeft } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 import { getDossiers, updateSpfeiAdmin, envoyerDossier } from '../api/dossiers'
 import DossierCard from '../components/DossierCard'
