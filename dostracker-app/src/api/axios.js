@@ -37,7 +37,12 @@ api.interceptors.response.use(
   async err => {
     const originalRequest = err.config
 
-    if (err.response?.status === 401 && !originalRequest._retry) {
+    // Les appels d'authentification (login, reset...) renvoient 401 pour de mauvais identifiants :
+    // ce n'est PAS une session expirée. On laisse l'erreur remonter pour que la page affiche
+    // le message, au lieu de tenter un refresh puis de recharger /login.
+    const isAuthCall = /\/auth\/(login|refresh-token|forgot-password|validate-reset-token|reset-password)/.test(originalRequest?.url ?? '')
+
+    if (err.response?.status === 401 && !isAuthCall && !originalRequest._retry) {
       if (isRefreshing) {
         return new Promise((resolve, reject) => {
           failedQueue.push({ resolve, reject })
@@ -74,8 +79,9 @@ api.interceptors.response.use(
         localStorage.removeItem('dostracker_access_token')
         localStorage.removeItem('dostracker_refresh_token')
         localStorage.removeItem('dostracker_user')
-        window.location.href = '/login'
-        return Promise.reject(refreshError)
+        // Session réellement expirée : retour au login (sans boucle de rechargement si on y est déjà)
+        if (window.location.pathname !== '/login') window.location.href = '/login'
+        return Promise.reject(err)
       } finally {
         isRefreshing = false
       }
