@@ -1,96 +1,97 @@
 import { useEffect, useRef } from 'react'
 import * as THREE from 'three'
-import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js'
-import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js'
-import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js'
-import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js'
 
 /**
- * Fond 3D du login — « carte topographique holographique » du foncier.
- *  - relief en courbes de niveau + grille, balayé par une onde de scan
- *  - 3 bornes lumineuses = le parcours d'un dossier (Courrier → SPFEI → Conservation)
- *  - des dossiers (documents) voyagent d'une borne à l'autre avec une traînée
- *  - étincelles, étoiles, bloom, caméra qui dérive + parallaxe souris
+ * Fond 3D du login — le foncier rural, de la parcelle au certificat.
+ *
+ * Une campagne au crépuscule : un patchwork de parcelles cultivées, quelques arbres.
+ * Toutes les ~15 s, une parcelle est régularisée, en 4 temps calmes :
+ *   1. des bornes sont plantées aux 4 coins
+ *   2. le périmètre est tracé (bornage)
+ *   3. la parcelle est reconnue (teinte verte)
+ *   4. le certificat foncier apparaît au-dessus, puis s'efface
+ * Pas de bloom, pas de néons : lumière douce, mouvements lents.
  */
-const ORANGE = 0xf47920
-const GREEN = 0x1fd070
-const WHITE = 0xffffff
+const SIZE = 13 // grille SIZE x SIZE
+const STEP = 3.5 // pas entre parcelles
+const PARCEL = 3.0 // taille d'une parcelle (le reste = limites/chemins)
+const CYCLE = 15 // secondes par parcelle régularisée
 
-// Hauteur du relief — miroir exact de hf() dans le vertex shader (hors ondulation animée)
-const height = (x, z) => 0.9 * Math.sin(x * 0.28) * Math.cos(z * 0.24) + 0.4 * Math.sin(x * 0.7 + z * 0.5)
+const PALETTE = ['#5d7a3c', '#7a8a40', '#8c7340', '#9c7a43', '#4f6c40', '#6b5d3b', '#3f5f47']
+const ACTIVE_CELLS = [[3, 7], [9, 6], [3, 4], [9, 8]] // de part et d'autre de la carte de login
 
-const TERRAIN_VERT = /* glsl */ `
-  uniform float uTime;
-  varying float vH;
-  varying vec3 vPos;
-  float hf(vec2 p){ return 0.9*sin(p.x*0.28)*cos(p.y*0.24) + 0.4*sin(p.x*0.7+p.y*0.5); }
-  void main(){
-    vec3 p = position;
-    float h = hf(p.xz) + 0.12*sin(length(p.xz)*1.5 - uTime*2.0);
-    p.y = h; vH = h; vPos = p;
-    gl_Position = projectionMatrix * modelViewMatrix * vec4(p, 1.0);
-  }
-`
-const TERRAIN_FRAG = /* glsl */ `
-  uniform float uTime;
-  uniform vec3 uOrange;
-  uniform vec3 uGreen;
-  varying float vH;
-  varying vec3 vPos;
-  void main(){
-    float s = vH * 3.0;
-    float f = fract(s);
-    float w = fwidth(s);
-    float contour = 1.0 - smoothstep(0.0, w * 1.4, min(f, 1.0 - f));
+const height = (x, z) => 0.5 * Math.sin(x * 0.15) * Math.cos(z * 0.13) + 0.25 * Math.sin(x * 0.35 + z * 0.3)
+const clamp01 = (v) => Math.min(1, Math.max(0, v))
+const ease = (v) => 1 - Math.pow(1 - clamp01(v), 3)
+const rand = (i) => Math.abs(Math.sin(i * 127.1 + 311.7) * 43758.5453) % 1
 
-    vec2 gp = vPos.xz * 0.6;
-    vec2 g = abs(fract(gp - 0.5) - 0.5) / fwidth(gp);
-    float grid = 1.0 - min(min(g.x, g.y), 1.0);
-
-    float d = length(vPos.xz);
-    float fade = 1.0 - smoothstep(7.0, 21.0, d);
-
-    float pr = mod(uTime * 3.5, 28.0);
-    float pulse = exp(-pow((d - pr) * 0.9, 2.0));
-
-    vec3 col = mix(uGreen, uOrange, smoothstep(-0.9, 1.2, vH));
-    float a = (contour * 0.85 + grid * 0.28) * fade;
-    a += pulse * 0.6 * fade * (contour + grid * 0.6 + 0.15);
-    col += vec3(1.0) * pulse * 0.45;
-    gl_FragColor = vec4(col * 1.4, a);
-  }
-`
+// Texture « rangs de culture » : bandes alternées de la couleur de la parcelle
+function cropTexture(hex) {
+  const c = document.createElement('canvas')
+  c.width = c.height = 64
+  const g = c.getContext('2d')
+  g.fillStyle = hex
+  g.fillRect(0, 0, 64, 64)
+  g.fillStyle = 'rgba(0,0,0,0.13)'
+  for (let y = 0; y < 64; y += 8) g.fillRect(0, y, 64, 4)
+  const t = new THREE.CanvasTexture(c)
+  t.colorSpace = THREE.SRGBColorSpace
+  return t
+}
 
 function glowTexture() {
   const c = document.createElement('canvas')
   c.width = c.height = 64
   const g = c.getContext('2d')
   const grad = g.createRadialGradient(32, 32, 0, 32, 32, 32)
-  grad.addColorStop(0, 'rgba(255,255,255,1)')
-  grad.addColorStop(0.35, 'rgba(255,255,255,0.45)')
+  grad.addColorStop(0, 'rgba(255,255,255,0.9)')
   grad.addColorStop(1, 'rgba(255,255,255,0)')
   g.fillStyle = grad
   g.fillRect(0, 0, 64, 64)
   return new THREE.CanvasTexture(c)
 }
 
-function labelSprite(text, color) {
+// Le certificat foncier (papier crème, bandeau aux couleurs CI, sceau)
+function certificateTexture() {
+  const W = 340
+  const H = 440
   const c = document.createElement('canvas')
-  c.width = 512
-  c.height = 128
+  c.width = W
+  c.height = H
   const g = c.getContext('2d')
-  g.font = '700 54px "Segoe UI", system-ui, sans-serif'
+  g.fillStyle = '#f7f1e3'
+  g.fillRect(0, 0, W, H)
+  g.strokeStyle = '#b9a67a'
+  g.lineWidth = 3
+  g.strokeRect(12, 12, W - 24, H - 24)
+  const band = W - 24
+  g.fillStyle = '#f47920'; g.fillRect(12, 12, band / 3, 12)
+  g.fillStyle = '#ffffff'; g.fillRect(12 + band / 3, 12, band / 3, 12)
+  g.fillStyle = '#00853f'; g.fillRect(12 + (2 * band) / 3, 12, band / 3, 12)
+  g.fillStyle = '#2a2a2a'
   g.textAlign = 'center'
-  g.textBaseline = 'middle'
-  g.shadowColor = color
-  g.shadowBlur = 22
-  g.fillStyle = '#ffffff'
-  g.fillText(text.toUpperCase(), 256, 64)
-  const tex = new THREE.CanvasTexture(c)
-  tex.colorSpace = THREE.SRGBColorSpace
-  const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false }))
-  s.scale.set(3.2, 0.8, 1)
-  return s
+  g.font = '700 22px Georgia, serif'
+  g.fillText('RÉPUBLIQUE DE CÔTE D’IVOIRE', W / 2, 62)
+  g.font = '700 30px Georgia, serif'
+  g.fillStyle = '#00642f'
+  g.fillText('CERTIFICAT FONCIER', W / 2, 118)
+  g.fillStyle = '#6b6b6b'
+  g.font = '15px Georgia, serif'
+  g.fillText('Parcelle rurale — délimitée et bornée', W / 2, 148)
+  g.fillStyle = '#cfc6ae'
+  for (let i = 0; i < 6; i++) g.fillRect(44, 190 + i * 26, i % 3 === 2 ? 170 : 252, 5)
+  g.strokeStyle = '#f47920'
+  g.lineWidth = 4
+  g.beginPath(); g.arc(W - 90, H - 92, 38, 0, Math.PI * 2); g.stroke()
+  g.fillStyle = 'rgba(244,121,32,0.18)'
+  g.beginPath(); g.arc(W - 90, H - 92, 38, 0, Math.PI * 2); g.fill()
+  g.fillStyle = '#f47920'
+  g.font = '700 22px Georgia, serif'
+  g.fillText('AFOR', W - 90, H - 85)
+  const t = new THREE.CanvasTexture(c)
+  t.colorSpace = THREE.SRGBColorSpace
+  t.anisotropy = 4
+  return t
 }
 
 export default function LandScene() {
@@ -101,218 +102,136 @@ export default function LandScene() {
     if (!mount) return
     const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches
 
-    const renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: 'high-performance' })
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5))
-    renderer.setClearColor(0x000000, 1)
+    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true })
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
+    renderer.setClearColor(0x000000, 0) // le ciel est le dégradé CSS du conteneur
     renderer.domElement.setAttribute('aria-hidden', 'true')
     mount.appendChild(renderer.domElement)
 
     const scene = new THREE.Scene()
-    scene.fog = new THREE.FogExp2(0x000000, 0.02)
-    const camera = new THREE.PerspectiveCamera(50, 1, 0.1, 200)
+    scene.fog = new THREE.FogExp2(0x5a4630, 0.018) // = couleur de l'horizon du ciel CSS
+    const camera = new THREE.PerspectiveCamera(46, 1, 0.1, 150)
 
-    const glow = glowTexture()
-    const disposables = [glow]
+    scene.add(new THREE.HemisphereLight(0xffe2c0, 0x2b2a22, 1.05))
+    const sun = new THREE.DirectionalLight(0xffc890, 1.0)
+    sun.position.set(-14, 9, 7)
+    scene.add(sun)
 
-    // ---------- Ciel : dôme dégradé (valeurs linéaires, le post-traitement convertit en sRGB) ----------
-    const sky = new THREE.Mesh(
-      new THREE.SphereGeometry(95, 32, 16),
-      new THREE.ShaderMaterial({
-        side: THREE.BackSide,
-        depthWrite: false,
-        fog: false,
-        vertexShader: 'varying vec3 vP; void main(){ vP = position; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }',
-        fragmentShader: `
-          varying vec3 vP;
-          void main(){
-            float h = clamp(normalize(vP).y, 0.0, 1.0);
-            vec3 top = vec3(0.0006, 0.0016, 0.0045);
-            vec3 hor = vec3(0.0060, 0.0100, 0.0160);
-            vec3 glow = vec3(0.020, 0.010, 0.002) * exp(-h * 9.0);
-            gl_FragColor = vec4(mix(hor, top, pow(h, 0.45)) + glow, 1.0);
-          }`,
-      })
+    const disposables = []
+    const track = (o) => { disposables.push(o); return o }
+
+    // ---------- Sol (terre) ----------
+    const ground = new THREE.Mesh(
+      track(new THREE.PlaneGeometry(160, 160)),
+      track(new THREE.MeshLambertMaterial({ color: 0x2c261c }))
     )
-    scene.add(sky)
+    ground.rotation.x = -Math.PI / 2
+    ground.position.y = -0.1
+    scene.add(ground)
 
-    // ---------- Relief ----------
-    const terrainGeo = new THREE.PlaneGeometry(46, 46, 150, 150)
-    terrainGeo.rotateX(-Math.PI / 2)
-    const terrainMat = new THREE.ShaderMaterial({
-      vertexShader: TERRAIN_VERT,
-      fragmentShader: TERRAIN_FRAG,
-      uniforms: {
-        uTime: { value: 0 },
-        uOrange: { value: new THREE.Color(ORANGE) },
-        uGreen: { value: new THREE.Color(GREEN) },
-      },
-      transparent: true,
-      depthWrite: false,
-      blending: THREE.AdditiveBlending,
-      side: THREE.DoubleSide,
-    })
-    scene.add(new THREE.Mesh(terrainGeo, terrainMat))
+    // ---------- Parcelles ----------
+    const textures = PALETTE.map((hex) => track(cropTexture(hex)))
+    const parcelGeo = track(new THREE.BoxGeometry(PARCEL, 0.16, PARCEL))
+    const parcelMats = textures.map((map) => track(new THREE.MeshLambertMaterial({ map })))
+    const origin = -((SIZE - 1) / 2) * STEP
+    const cellPos = (ix, iz) => {
+      const x = origin + ix * STEP
+      const z = origin + iz * STEP
+      return new THREE.Vector3(x, height(x, z), z)
+    }
+    for (let ix = 0; ix < SIZE; ix++) {
+      for (let iz = 0; iz < SIZE; iz++) {
+        const i = ix * SIZE + iz
+        const m = new THREE.Mesh(parcelGeo, parcelMats[Math.floor(rand(i) * PALETTE.length)])
+        m.position.copy(cellPos(ix, iz))
+        m.rotation.y = Math.floor(rand(i + 50) * 4) * (Math.PI / 2) // sens des rangs
+        scene.add(m)
+      }
+    }
 
-    // ---------- Bornes (étapes du dossier) ----------
-    const NODES = [
-      { x: -7, z: 2.5, color: ORANGE, label: 'Courrier' },
-      { x: 0, z: -2.5, color: WHITE, label: 'SPFEI' },
-      { x: 7, z: 2.5, color: GREEN, label: 'Conservation' },
-    ].map((n) => ({ ...n, y: height(n.x, n.z) }))
-
-    const nodeAnim = []
-    NODES.forEach((n) => {
+    // ---------- Arbres (aux croisements de chemins) ----------
+    const trunkGeo = track(new THREE.CylinderGeometry(0.06, 0.09, 0.55, 6))
+    const crownGeo = track(new THREE.IcosahedronGeometry(0.5, 0))
+    const trunkMat = track(new THREE.MeshLambertMaterial({ color: 0x4a3524 }))
+    const crownMats = [0x2f5a35, 0x3b6b3a, 0x2a4f33].map((c) => track(new THREE.MeshLambertMaterial({ color: c, flatShading: true })))
+    const trees = []
+    for (let k = 0; k < 60; k++) {
+      const x = origin + Math.floor(rand(k + 200) * (SIZE + 1)) * STEP - STEP / 2
+      const z = origin + Math.floor(rand(k + 400) * (SIZE + 1)) * STEP - STEP / 2
       const g = new THREE.Group()
-      g.position.set(n.x, n.y, n.z)
-
-      const core = new THREE.Mesh(
-        new THREE.IcosahedronGeometry(0.42, 1),
-        new THREE.MeshBasicMaterial({ color: n.color, wireframe: true })
-      )
-      core.position.y = 1.3
-      const inner = new THREE.Mesh(
-        new THREE.IcosahedronGeometry(0.2, 0),
-        new THREE.MeshBasicMaterial({ color: n.color })
-      )
-      inner.position.y = 1.3
-
-      const ringA = new THREE.Mesh(
-        new THREE.TorusGeometry(0.95, 0.018, 8, 80),
-        new THREE.MeshBasicMaterial({ color: n.color })
-      )
-      const ringB = ringA.clone()
-      ringA.position.y = ringB.position.y = 1.3
-
-      const beam = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.05, 0.28, 9, 16, 1, true),
-        new THREE.MeshBasicMaterial({
-          color: n.color, transparent: true, opacity: 0.09, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide,
-        })
-      )
-      beam.position.y = 4.5
-
-      const base = new THREE.Mesh(
-        new THREE.RingGeometry(0.9, 1.0, 64),
-        new THREE.MeshBasicMaterial({
-          color: n.color, transparent: true, opacity: 0.9, side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthWrite: false,
-        })
-      )
-      base.rotation.x = -Math.PI / 2
-      base.position.y = 0.05
-
-      const label = labelSprite(n.label, '#' + new THREE.Color(n.color).getHexString())
-      label.position.y = 2.7
-
-      g.add(core, inner, ringA, ringB, beam, base, label)
+      const trunk = new THREE.Mesh(trunkGeo, trunkMat)
+      trunk.position.y = 0.27
+      const crown = new THREE.Mesh(crownGeo, crownMats[k % 3])
+      crown.position.y = 0.85
+      crown.scale.setScalar(0.8 + rand(k + 900) * 0.7)
+      g.add(trunk, crown)
+      g.position.set(x, height(x, z), z)
       scene.add(g)
-      nodeAnim.push({ core, ringA, ringB, base, beam })
+      trees.push({ g, phase: rand(k) * 6.28 })
+    }
+
+    // ---------- Régularisation d'une parcelle ----------
+    const POSTS_TIME = 0.55
+    const hl = PARCEL / 2
+    const corners = [[-hl, -hl], [hl, -hl], [hl, hl], [-hl, hl]]
+    const active = new THREE.Group()
+    scene.add(active)
+
+    const postGeo = track(new THREE.BoxGeometry(0.11, 0.8, 0.11))
+    const capGeo = track(new THREE.SphereGeometry(0.1, 10, 8))
+    const postMat = track(new THREE.MeshLambertMaterial({ color: 0xf3ede0 }))
+    const capMat = track(new THREE.MeshLambertMaterial({ color: 0xf47920 }))
+    const posts = corners.map(([cx, cz]) => {
+      const p = new THREE.Group()
+      const body = new THREE.Mesh(postGeo, postMat)
+      body.position.y = 0.4
+      const cap = new THREE.Mesh(capGeo, capMat)
+      cap.position.y = 0.82
+      p.add(body, cap)
+      p.position.set(cx, 0.08, cz)
+      active.add(p)
+      return p
     })
 
-    // ---------- Chemin des dossiers ----------
-    const up = (n, dy) => new THREE.Vector3(n.x, n.y + dy, n.z)
-    const path = new THREE.CatmullRomCurve3(
-      [
-        new THREE.Vector3(-14, 3.2, 6.5),
-        up(NODES[0], 1.3),
-        new THREE.Vector3(-3.6, 3.4, -0.2),
-        up(NODES[1], 1.3),
-        new THREE.Vector3(3.6, 3.4, -0.2),
-        up(NODES[2], 1.3),
-        new THREE.Vector3(14, 3.2, 6.5),
-      ],
-      false,
-      'catmullrom',
-      0.5
-    )
-    // trait lumineux du chemin
-    const pathLine = new THREE.Line(
-      new THREE.BufferGeometry().setFromPoints(path.getPoints(200)),
-      new THREE.LineBasicMaterial({ color: 0xf9a05a, transparent: true, opacity: 0.22, blending: THREE.AdditiveBlending })
-    )
-    scene.add(pathLine)
+    const lineGeo = track(new THREE.BoxGeometry(PARCEL, 0.05, 0.09))
+    const lineMat = track(new THREE.MeshBasicMaterial({ color: 0xf9a05a, transparent: true }))
+    const sides = corners.map(([cx, cz], i) => {
+      const [nx, nz] = corners[(i + 1) % 4]
+      const pivot = new THREE.Group()
+      pivot.position.set(cx, 0.2, cz)
+      pivot.rotation.y = -Math.atan2(nz - cz, nx - cx)
+      const seg = new THREE.Mesh(lineGeo, lineMat)
+      seg.position.x = PARCEL / 2
+      pivot.add(seg)
+      active.add(pivot)
+      return pivot
+    })
 
-    const DOCS = 6
-    const TRAIL = 28
-    const docs = []
-    const docGeo = new THREE.BoxGeometry(0.5, 0.035, 0.7)
-    const edgeGeo = new THREE.EdgesGeometry(docGeo)
-    for (let i = 0; i < DOCS; i++) {
-      const group = new THREE.Group()
-      group.add(
-        new THREE.Mesh(docGeo, new THREE.MeshBasicMaterial({ color: 0xffe2c8 })),
-        new THREE.LineSegments(edgeGeo, new THREE.LineBasicMaterial({ color: ORANGE }))
-      )
-      const halo = new THREE.Sprite(
-        new THREE.SpriteMaterial({ map: glow, color: ORANGE, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, opacity: 0.9 })
-      )
-      halo.scale.set(1.8, 1.8, 1)
-      group.add(halo)
-      scene.add(group)
+    const tintMat = track(new THREE.MeshBasicMaterial({ color: 0x2fd27a, transparent: true, opacity: 0, depthWrite: false }))
+    const tint = new THREE.Mesh(track(new THREE.PlaneGeometry(PARCEL - 0.1, PARCEL - 0.1)), tintMat)
+    tint.rotation.x = -Math.PI / 2
+    tint.position.y = 0.19
+    active.add(tint)
 
-      const trailPos = new Float32Array(TRAIL * 3)
-      const trailCol = new Float32Array(TRAIL * 3)
-      const trailGeo = new THREE.BufferGeometry()
-      trailGeo.setAttribute('position', new THREE.BufferAttribute(trailPos, 3))
-      trailGeo.setAttribute('color', new THREE.BufferAttribute(trailCol, 3))
-      const trail = new THREE.Line(
-        trailGeo,
-        new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false })
-      )
-      trail.frustumCulled = false
-      scene.add(trail)
-      docs.push({ group, trail, trailPos, trailCol, offset: i / DOCS, init: false })
+    const certTex = track(certificateTexture())
+    const certMat = track(new THREE.MeshBasicMaterial({ map: certTex, transparent: true, opacity: 0, side: THREE.DoubleSide }))
+    const cert = new THREE.Mesh(track(new THREE.PlaneGeometry(2.3, 2.95)), certMat)
+    active.add(cert)
+
+    // ---------- Poussières en suspension ----------
+    const glow = track(glowTexture())
+    const N = 90
+    const dPos = new Float32Array(N * 3)
+    for (let i = 0; i < N; i++) {
+      dPos[i * 3] = (rand(i + 1) - 0.5) * 44
+      dPos[i * 3 + 1] = 0.5 + rand(i + 2) * 7
+      dPos[i * 3 + 2] = (rand(i + 3) - 0.5) * 44
     }
-
-    // ---------- Étincelles ----------
-    const SPARKS = 420
-    const sPos = new Float32Array(SPARKS * 3)
-    const sVel = new Float32Array(SPARKS)
-    const sCol = new Float32Array(SPARKS * 3)
-    const palette = [new THREE.Color(ORANGE), new THREE.Color(GREEN), new THREE.Color(WHITE)]
-    const resetSpark = (i, spread = true) => {
-      const n = NODES[Math.floor(Math.random() * 3)]
-      const a = Math.random() * Math.PI * 2
-      const r = Math.random() * (spread ? 3.5 : 1.2)
-      sPos[i * 3] = n.x + Math.cos(a) * r
-      sPos[i * 3 + 1] = (spread ? Math.random() * 8 : 0.1) + n.y
-      sPos[i * 3 + 2] = n.z + Math.sin(a) * r
-      sVel[i] = 0.4 + Math.random() * 1.1
-      const c = palette[Math.floor(Math.random() * 3)]
-      sCol[i * 3] = c.r; sCol[i * 3 + 1] = c.g; sCol[i * 3 + 2] = c.b
-    }
-    for (let i = 0; i < SPARKS; i++) resetSpark(i)
-    const sGeo = new THREE.BufferGeometry()
-    sGeo.setAttribute('position', new THREE.BufferAttribute(sPos, 3))
-    sGeo.setAttribute('color', new THREE.BufferAttribute(sCol, 3))
-    scene.add(new THREE.Points(sGeo, new THREE.PointsMaterial({
-      size: 0.22, map: glow, vertexColors: true, transparent: true, opacity: 0.85,
-      blending: THREE.AdditiveBlending, depthWrite: false, sizeAttenuation: true,
-    })))
-
-    // ---------- Étoiles ----------
-    const STARS = 700
-    const stPos = new Float32Array(STARS * 3)
-    for (let i = 0; i < STARS; i++) {
-      const r = 45 + Math.random() * 40
-      const th = Math.random() * Math.PI * 2
-      const ph = Math.acos(Math.random() * 0.9 + 0.05) // hémisphère haute
-      stPos[i * 3] = r * Math.sin(ph) * Math.cos(th)
-      stPos[i * 3 + 1] = r * Math.cos(ph) * 0.7 + 4
-      stPos[i * 3 + 2] = r * Math.sin(ph) * Math.sin(th)
-    }
-    const stGeo = new THREE.BufferGeometry()
-    stGeo.setAttribute('position', new THREE.BufferAttribute(stPos, 3))
-    const stars = new THREE.Points(stGeo, new THREE.PointsMaterial({
-      size: 0.35, map: glow, color: 0xcfe3ff, transparent: true, opacity: 0.55, depthWrite: false, fog: false,
-    }))
-    scene.add(stars)
-
-    // ---------- Post-traitement : bloom ----------
-    const composer = new EffectComposer(renderer)
-    composer.addPass(new RenderPass(scene, camera))
-    const bloom = new UnrealBloomPass(new THREE.Vector2(256, 256), 0.55, 0.5, 0.3)
-    composer.addPass(bloom)
-    composer.addPass(new OutputPass())
+    const dGeo = track(new THREE.BufferGeometry())
+    dGeo.setAttribute('position', new THREE.BufferAttribute(dPos, 3))
+    scene.add(new THREE.Points(dGeo, track(new THREE.PointsMaterial({
+      size: 0.16, map: glow, color: 0xffd9a0, transparent: true, opacity: 0.3, depthWrite: false,
+    }))))
 
     // ---------- Interaction / resize ----------
     const mouse = { x: 0, y: 0, sx: 0, sy: 0 }
@@ -322,15 +241,13 @@ export default function LandScene() {
     }
     window.addEventListener('pointermove', onMove)
 
-    let dist = 22
+    let dist = 30
     const resize = () => {
       const w = mount.clientWidth || 1
       const h = mount.clientHeight || 1
       renderer.setSize(w, h)
-      composer.setSize(w, h)
-      bloom.setSize(w, h)
       camera.aspect = w / h
-      dist = w / h < 1 ? 34 : w / h < 1.5 ? 26 : 22
+      dist = w / h < 1 ? 46 : w / h < 1.5 ? 36 : 30
       camera.updateProjectionMatrix()
     }
     const ro = new ResizeObserver(resize)
@@ -338,73 +255,63 @@ export default function LandScene() {
     resize()
 
     // ---------- Boucle ----------
-    const clock = new THREE.Clock()
-    const tmp = new THREE.Vector3()
-    const ahead = new THREE.Vector3()
+    const t0 = performance.now()
     let raf = 0
+    let currentCell = -1
 
     const frame = () => {
-      const t = clock.getElapsedTime()
-      terrainMat.uniforms.uTime.value = t
+      const t = reduceMotion ? 9.5 : (performance.now() - t0) / 1000
+      const cycleIdx = Math.floor(t / CYCLE)
+      const c = t % CYCLE
 
-      // caméra : dérive lente + parallaxe
-      mouse.sx += (mouse.x - mouse.sx) * 0.04
-      mouse.sy += (mouse.y - mouse.sy) * 0.04
-      const az = Math.sin(t * 0.09) * 0.42 + mouse.sx * 0.18
-      camera.position.set(Math.sin(az) * dist, 6.8 + Math.sin(t * 0.13) * 0.8 - mouse.sy * 0.9, Math.cos(az) * dist)
-      camera.lookAt(0, 0.8, 0)
-
-      // bornes
-      nodeAnim.forEach((n, i) => {
-        n.core.rotation.y = t * 0.8 + i
-        n.core.rotation.x = t * 0.5
-        n.ringA.rotation.x = t * 1.1 + i
-        n.ringB.rotation.y = t * 0.9 + i
-        n.ringB.rotation.z = Math.PI / 3
-        const k = (t * 0.6 + i * 0.33) % 1
-        n.base.scale.setScalar(1 + k * 1.8)
-        n.base.material.opacity = 0.9 * (1 - k)
-        n.beam.material.opacity = 0.08 + Math.sin(t * 2 + i) * 0.03
-      })
-
-      // dossiers
-      docs.forEach((d) => {
-        const u = (t * 0.045 + d.offset) % 1
-        path.getPointAt(u, tmp)
-        path.getPointAt((u + 0.01) % 1, ahead)
-        d.group.position.copy(tmp)
-        d.group.position.y += Math.sin(t * 3 + d.offset * 10) * 0.06
-        d.group.lookAt(ahead)
-        d.group.rotation.z += Math.sin(t * 2 + d.offset * 6) * 0.01
-
-        // historique -> traînée
-        if (!d.init) {
-          for (let i = 0; i < TRAIL; i++) tmp.toArray(d.trailPos, i * 3)
-          d.init = true
-        }
-        d.trailPos.copyWithin(3, 0, (TRAIL - 1) * 3)
-        d.group.position.toArray(d.trailPos, 0)
-        for (let i = 0; i < TRAIL; i++) {
-          const f = 1 - i / (TRAIL - 1)
-          d.trailCol[i * 3] = 1.0 * f
-          d.trailCol[i * 3 + 1] = 0.55 * f
-          d.trailCol[i * 3 + 2] = 0.2 * f
-        }
-        d.trail.geometry.attributes.position.needsUpdate = true
-        d.trail.geometry.attributes.color.needsUpdate = true
-      })
-
-      // étincelles
-      for (let i = 0; i < SPARKS; i++) {
-        sPos[i * 3 + 1] += sVel[i] * 0.018
-        sPos[i * 3] += Math.sin(t + i) * 0.002
-        if (sPos[i * 3 + 1] > 9) resetSpark(i, false)
+      // changement de parcelle
+      if (cycleIdx !== currentCell) {
+        currentCell = cycleIdx
+        const [ix, iz] = ACTIVE_CELLS[cycleIdx % ACTIVE_CELLS.length]
+        active.position.copy(cellPos(ix, iz))
+        active.position.y += 0.08
       }
-      sGeo.attributes.position.needsUpdate = true
+      const fade = 1 - clamp01((c - 13) / 2) // disparition douce en fin de cycle
 
-      stars.rotation.y = t * 0.004
+      // 1. bornes
+      posts.forEach((p, i) => {
+        p.scale.set(1, Math.max(0.001, ease((c - i * POSTS_TIME) / 0.9) * fade), 1)
+      })
+      // 2. périmètre
+      sides.forEach((s, i) => {
+        const k = ease((c - 2.5 - i * 1.25) / 1.25)
+        s.scale.x = Math.max(0.001, k)
+        s.visible = k > 0.001
+      })
+      lineMat.opacity = fade
+      // 3. reconnaissance
+      tintMat.opacity = 0.3 * ease((c - 7) / 1.5) * fade
+      // 4. certificat
+      const ck = ease((c - 8.5) / 1.5) * fade
+      certMat.opacity = ck
+      cert.position.set(0, 2.9 + ck * 0.5 + Math.sin(t * 1.1) * 0.06, 0)
+      cert.rotation.y = Math.sin(t * 0.5) * 0.35
+      cert.scale.setScalar(0.85 + 0.15 * ck)
 
-      composer.render()
+      // arbres : léger balancement
+      trees.forEach(({ g, phase }) => { g.rotation.z = Math.sin(t * 0.6 + phase) * 0.015 })
+
+      // poussières : dérive très lente
+      for (let i = 0; i < N; i++) {
+        dPos[i * 3 + 1] += 0.0025
+        dPos[i * 3] += Math.sin(t * 0.2 + i) * 0.0012
+        if (dPos[i * 3 + 1] > 8) dPos[i * 3 + 1] = 0.4
+      }
+      dGeo.attributes.position.needsUpdate = true
+
+      // caméra : dérive lente + parallaxe discrète
+      mouse.sx += (mouse.x - mouse.sx) * 0.03
+      mouse.sy += (mouse.y - mouse.sy) * 0.03
+      const az = Math.sin(t * 0.045) * 0.22 + mouse.sx * 0.1
+      camera.position.set(Math.sin(az) * dist, 13 - mouse.sy * 0.8, Math.cos(az) * dist)
+      camera.lookAt(0, 0.3, 2)
+
+      renderer.render(scene, camera)
       if (!reduceMotion) raf = requestAnimationFrame(frame)
     }
     frame()
@@ -413,17 +320,19 @@ export default function LandScene() {
       cancelAnimationFrame(raf)
       ro.disconnect()
       window.removeEventListener('pointermove', onMove)
-      scene.traverse((o) => {
-        o.geometry?.dispose?.()
-        const m = o.material
-        if (m) (Array.isArray(m) ? m : [m]).forEach((x) => { x.map?.dispose?.(); x.dispose() })
-      })
-      disposables.forEach((d) => d.dispose())
-      composer.dispose()
+      disposables.forEach((d) => { d.map?.dispose?.(); d.dispose?.() })
       renderer.dispose()
       renderer.domElement.remove()
     }
   }, [])
 
-  return <div ref={mountRef} className="absolute inset-0" aria-hidden />
+  return (
+    <div
+      ref={mountRef}
+      className="absolute inset-0"
+      aria-hidden
+      // Ciel crépusculaire : l'horizon (≈ 12 % de la hauteur) a la couleur du brouillard de la scène
+      style={{ background: 'linear-gradient(180deg, #0d1822 0%, #20404a 6%, #6d5236 12%, #5a4630 17%, #5a4630 100%)' }}
+    />
+  )
 }
