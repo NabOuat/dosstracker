@@ -103,10 +103,10 @@ export default function DossierDetail({ dossier, onClose }) {
           )}
 
           {/* SPFEI Titre */}
-          {dossier.numero_tf && (
+          {dossier.numero_titre_foncier && (
             <Section title="SPFEI – Titre Foncier" icon={FileText}>
               <Row label="Conservation"   val={dossier.conservation} />
-              <Row label="N° Titre Foncier" val={dossier.numero_tf} accent="green" />
+              <Row label="N° Titre Foncier" val={dossier.numero_titre_foncier} accent="green" />
             </Section>
           )}
         </div>

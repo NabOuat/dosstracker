@@ -36,7 +36,7 @@ export default function SpfeiTitre() {
   
   useEffect(() => { load() }, [])
 
-  const handleOpen = d => { setActive(d); setForm({ conservation: d.conservation ?? '', numero_tf: d.numero_tf ?? '' }) }
+  const handleOpen = d => { setActive(d); setForm({ conservation: d.conservation ?? '', numero_tf: d.numero_titre_foncier ?? '' }) }
   const handleChange = e => setForm(f => ({ ...f, [e.target.name]: e.target.value }))
 
   const handleSubmit = async e => {
@@ -46,7 +46,10 @@ export default function SpfeiTitre() {
     }
     setSaving(true); setError('')
     try {
-      await updateSpfeiTitre(active.id, form)
+      await updateSpfeiTitre(active.id, {
+        conservation: form.conservation.trim(),
+        numero_titre_foncier: form.numero_tf.trim(), // le backend attend numero_titre_foncier
+      })
       setSuccess('Titre Foncier attribué. Dossier transmis à la Conservation. SMS envoyé au propriétaire.')
       setActive(null); await load()
       setTimeout(() => setSuccess(''), 5000)

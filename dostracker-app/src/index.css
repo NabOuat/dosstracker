@@ -594,3 +594,44 @@ body {
   font-weight: 800;
   line-height: 1;
 }
+
+
+/* ===== ANIMATIONS D'APP =====
+   fill-mode "backwards" (jamais "both") : aucun transform résiduel après l'animation,
+   sinon les enfants `position: fixed` (modals) seraient piégés dans le conteneur. */
+@keyframes pageIn   { from { opacity: 0; transform: translateY(18px); } }
+@keyframes rowIn    { from { opacity: 0; transform: translateX(-12px); } }
+@keyframes modalPop { from { opacity: 0; transform: translateY(14px) scale(0.96); } }
+@keyframes backdropIn { from { opacity: 0; } }
+@keyframes panelIn  { from { opacity: 0; transform: translateX(40px); } }
+
+.page-enter > * { animation: pageIn 0.55s cubic-bezier(.22,.9,.3,1) backwards; }
+.page-enter > *:nth-child(2) { animation-delay: .06s; }
+.page-enter > *:nth-child(3) { animation-delay: .12s; }
+.page-enter > *:nth-child(4) { animation-delay: .18s; }
+.page-enter > *:nth-child(5) { animation-delay: .24s; }
+.page-enter > *:nth-child(n+6) { animation-delay: .3s; }
+
+/* Lignes de tableau en cascade */
+.page-enter tbody tr { animation: rowIn 0.4s ease-out backwards; }
+.page-enter tbody tr:nth-child(1) { animation-delay: .15s; }
+.page-enter tbody tr:nth-child(2) { animation-delay: .20s; }
+.page-enter tbody tr:nth-child(3) { animation-delay: .25s; }
+.page-enter tbody tr:nth-child(4) { animation-delay: .30s; }
+.page-enter tbody tr:nth-child(5) { animation-delay: .35s; }
+.page-enter tbody tr:nth-child(n+6) { animation-delay: .4s; }
+
+/* Modals : fond qui s'estompe, boîte qui « pop » */
+.fixed.inset-0 { animation: backdropIn 0.2s ease-out backwards; }
+.fixed.inset-0 > div { animation: modalPop 0.28s cubic-bezier(.22,.9,.3,1) backwards; }
+
+/* Micro-interactions */
+.btn { transition: transform .15s ease, box-shadow .2s ease, background-color .2s ease; }
+.btn:not(:disabled):hover  { transform: translateY(-1px); }
+.btn:not(:disabled):active { transform: translateY(0) scale(0.97); }
+.card, .stat-card { transition: transform .25s ease, box-shadow .25s ease; }
+.card:hover, .stat-card:hover { transform: translateY(-3px); }
+
+@media (prefers-reduced-motion: reduce) {
+  .page-enter > *, .page-enter tbody tr, .fixed.inset-0, .fixed.inset-0 > div { animation: none !important; }
+}

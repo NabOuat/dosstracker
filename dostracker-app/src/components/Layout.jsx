@@ -1,6 +1,6 @@
 import { useState, useRef, useCallback, useEffect } from 'react'
 import { createPortal } from 'react-dom'
-import { Outlet, useNavigate } from 'react-router-dom'
+import { Outlet, useNavigate, useLocation } from 'react-router-dom'
 import { Menu, Bell, Settings, X, CheckCircle, AlertCircle, LogOut } from 'lucide-react'
 import Sidebar, { SIDEBAR_W } from './Sidebar'
 import { useAuth } from '../context/AuthContext'
@@ -144,6 +144,7 @@ export default function Layout() {
   const desktopBellRef = useRef(null)
   const { user } = useAuth()
   const navigate = useNavigate()
+  const location = useLocation()
 
   // Charger le timestamp "vider" depuis localStorage dès que l'utilisateur est connu
   useEffect(() => {
@@ -273,7 +274,9 @@ export default function Layout() {
           style={{ position: 'relative', background: 'var(--n-50)' }}
         >
           <ServiceBackground serviceId={user?.service_id} />
-          <div style={{ position: 'relative', zIndex: 1 }}>
+          {/* PAS de z-index ici : un z-index créerait un contexte d'empilement et les modals
+              (fixed, z-50) passeraient SOUS la topbar (z-30) et la sidebar. */}
+          <div key={location.pathname} className="page-enter" style={{ position: 'relative' }}>
             <Outlet />
           </div>
         </main>
