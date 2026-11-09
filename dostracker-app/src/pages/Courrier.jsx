@@ -5,10 +5,12 @@ import {
 } from 'lucide-react'
 import {
   getDossiers, createDossier, envoyerAuSpfei,
-  isDossierModifiable, demanderDroitsAdmin
+  isDossierModifiable, demanderDroitsAdmin,
+  findProprietaireByContact, updateProprietaireNom
 } from '../api/dossiers'
 import DossierCard from '../components/DossierCard'
 import DossierDetail from '../components/DossierDetail'
+import ProprietaireConflictModal from '../components/ProprietaireConflictModal'
 import ServiceDashboardSection from '../components/ServiceDashboardSection'
 import Button from '../components/ui/Button'
 import Input from '../components/ui/Input'
@@ -18,7 +20,7 @@ import { useAuth } from '../context/AuthContext'
 
 const INIT = {
   numero: '', date_enregistrement: new Date().toISOString().slice(0, 10),
-  region: '', prefecture: '', sous_prefecture: '', village: '', departement: '',
+  region: '', sous_prefecture: '', village: '', departement: '',
   numero_cf: '', demandeur: '', contact: '',
 }
 
@@ -38,6 +40,7 @@ export default function Courrier({ mode = 'creer' }) {
   const [demandeForm, setDemandeForm] = useState({ dossier_id: null, motif: '' })
   const [demandeSending, setDemandeSending] = useState(false)
   const [showDashboard, setShowDashboard] = useState(false)
+  const [conflict, setConflict] = useState(null) // { existing, entered }
 
   const load = () => getDossiers('COURRIER').then(d => {
     setDossiers(Array.isArray(d) ? d : [])
@@ -92,14 +95,10 @@ export default function Courrier({ mode = 'creer' }) {
     finally { setDemandeSending(false) }
   }
 
-  const handleSubmit = async e => {
-    e.preventDefault()
-    if (!form.numero.trim() || !form.demandeur.trim() || !form.contact.trim() || !form.region.trim()) {
-      setError('Les champs marqués * sont obligatoires.'); return
-    }
+  const doCreate = async (forcedProprietaireId = null) => {
     setSaving(true); setError(''); setSuccess('')
     try {
-      await createDossier(form)
+      await createDossier({ ...form, forcedProprietaireId })
       setSuccess('✅ Dossier enregistré avec succès !')
       setForm(INIT); setShowForm(false); setEditMode(false)
       const updated = await load()
@@ -115,6 +114,31 @@ export default function Courrier({ mode = 'creer' }) {
         setError(`ERREUR: ${errorMsg}`)
       }
     } finally { setSaving(false) }
+  }
+
+  const handleSubmit = async e => {
+    e.preventDefault()
+    if (!form.numero.trim() || !form.demandeur.trim() || !form.contact.trim() || !form.region.trim()) {
+      setError('Les champs marqués * sont obligatoires.'); return
+    }
+    // Vérifier si le contact existe déjà avec un nom différent
+    const existing = await findProprietaireByContact(form.contact)
+    if (existing && existing.nom_complet.trim() !== form.demandeur.trim()) {
+      setConflict({ existing, entered: form.demandeur })
+      return
+    }
+    await doCreate()
+  }
+
+  const handleConflictEcraser = async () => {
+    await updateProprietaireNom(conflict.existing.id, conflict.entered)
+    setConflict(null)
+    await doCreate(conflict.existing.id)
+  }
+
+  const handleConflictGarder = async () => {
+    setConflict(null)
+    await doCreate(conflict.existing.id)
   }
 
   const handleEnvoyer = async id => {
@@ -133,6 +157,7 @@ export default function Courrier({ mode = 'creer' }) {
   const closeForm = () => { setShowForm(false); setEditMode(false); setForm(INIT); setError('') }
 
   return (
+    <>
     <motion.div
       initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.25 }}
       className="page"
@@ -227,14 +252,11 @@ export default function Courrier({ mode = 'creer' }) {
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <Input label="Préfecture"            name="prefecture"                     value={form.prefecture}          onChange={handleChange} placeholder="ex : Abidjan" />
                   <Input label="Sous-Préfecture"       name="sous_prefecture"                value={form.sous_prefecture}     onChange={handleChange} placeholder="ex : Cocody" />
+                  <Input label="Village"               name="village"                        value={form.village}             onChange={handleChange} placeholder="ex : Riviera" />
                 </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <Input label="Village"               name="village"                        value={form.village}             onChange={handleChange} placeholder="ex : Riviera" />
-                  <Input label="Numéro de la demande"  name="numero_cf"                      value={form.numero_cf}           onChange={handleChange} placeholder="ex : DEM-2026-0001" />
-                </div>
+                <Input label="Numéro de la demande"    name="numero_cf"                      value={form.numero_cf}           onChange={handleChange} placeholder="ex : DEM-2026-0001" />
 
                 <div className="flex gap-3 justify-end pt-2">
                   <Button type="button" variant="ghost" onClick={closeForm}>Annuler</Button>
@@ -364,5 +386,18 @@ export default function Courrier({ mode = 'creer' }) {
         <DossierDetail dossier={selected} onClose={() => setSelected(null)} />
       </div>
     </motion.div>
+
+    {/* Modal de conflit propriétaire */}
+    {conflict && (
+      <ProprietaireConflictModal
+        existing={conflict.existing}
+        entered={conflict.entered}
+        contact={form.contact}
+        onEcraser={handleConflictEcraser}
+        onGarder={handleConflictGarder}
+        onAnnuler={() => setConflict(null)}
+      />
+    )}
+    </>
   )
 }

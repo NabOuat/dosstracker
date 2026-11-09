@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
-import { Upload, X, File, Trash2, AlertCircle } from 'lucide-react'
-import { uploadPieceJointe, getPiecesJointesDossier, deletePieceJointe } from '../api/piecesJointes'
+import { Upload, X, File, Trash2, AlertCircle, Download } from 'lucide-react'
+import { uploadPieceJointe, getPiecesJointesDossier, deletePieceJointe, downloadPieceJointe } from '../api/piecesJointes'
 import Button from './ui/Button'
 import Alert from './ui/Alert'
 import { motion, AnimatePresence } from 'framer-motion'
@@ -197,6 +197,13 @@ export default function FileUploadModal({ dossierId, isOpen, onClose }) {
                         <p className="text-xs text-neutral-500">{formatFileSize(file.taille_octets)}</p>
                       </div>
                     </div>
+                    <button
+                      onClick={() => downloadPieceJointe(file.id).catch(() => setError('Téléchargement impossible.'))}
+                      className="p-1 rounded hover:bg-green-100 transition-colors flex-shrink-0"
+                      aria-label="Télécharger"
+                    >
+                      <Download size={16} className="text-green-700" />
+                    </button>
                     <button
                       onClick={() => handleDeleteFile(file.id)}
                       disabled={deleting === file.id}

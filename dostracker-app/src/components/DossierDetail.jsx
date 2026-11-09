@@ -1,3 +1,4 @@
+import { createPortal } from 'react-dom'
 import { X, Phone, MapPin, Calendar, User, FileText } from 'lucide-react'
 import WorkflowBadge, { WorkflowStepper } from './WorkflowBadge'
 
@@ -9,7 +10,7 @@ import WorkflowBadge, { WorkflowStepper } from './WorkflowBadge'
 export default function DossierDetail({ dossier, onClose }) {
   if (!dossier) return null
 
-  return (
+  return createPortal(
     <>
       {/* Overlay */}
       <div
@@ -56,7 +57,6 @@ export default function DossierDetail({ dossier, onClose }) {
             <Row label="Contact demandeur" val={dossier.contact_demandeur} icon={Phone} />
             <Row label="Agent Courrier"   val={dossier.agent_courrier} />
             <Row label="Région"           val={dossier.region} icon={MapPin} />
-            <Row label="Préfecture"       val={dossier.prefecture} />
             <Row label="Sous-Préfecture"  val={dossier.sous_prefecture} />
             <Row label="Village"          val={dossier.village} />
             <Row label="Département"      val={dossier.departement} />
@@ -111,7 +111,8 @@ export default function DossierDetail({ dossier, onClose }) {
           )}
         </div>
       </div>
-    </>
+    </>,
+    document.body
   )
 }
 

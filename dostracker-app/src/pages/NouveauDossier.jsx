@@ -1,18 +1,19 @@
 import { useState } from 'react'
+import { motion, AnimatePresence } from 'framer-motion'
 import { ChevronLeft, Save } from 'lucide-react'
 import { Link, useNavigate } from 'react-router-dom'
 import { Button, Input, Alert } from '../components/ui'
-import { createDossier } from '../api/dossiers'
+import { createDossier, findProprietaireByContact, updateProprietaireNom } from '../api/dossiers'
+import ProprietaireConflictModal from '../components/ProprietaireConflictModal'
 
 export default function NouveauDossier() {
   const navigate = useNavigate()
-  const [form, setForm] = useState({ 
-    demandeur: '', 
-    contact: '', 
-    region: '', 
-    prefecture: '', 
-    sous_prefecture: '', 
-    village: '', 
+  const [form, setForm] = useState({
+    demandeur: '',
+    contact: '',
+    region: '',
+    sous_prefecture: '',
+    village: '',
     departement: '',
     numero_demande: '',
     numero_cf: '',
@@ -21,17 +22,16 @@ export default function NouveauDossier() {
   const [saved, setSaved] = useState(false)
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
+  const [conflict, setConflict] = useState(null)
 
   const handleChange = e => {
     setForm(f => ({ ...f, [e.target.name]: e.target.value }))
     setError('')
   }
 
-  const handleSubmit = async e => {
-    e.preventDefault()
+  const doCreate = async (forcedProprietaireId = null) => {
     setSaving(true)
     setError('')
-    
     try {
       await createDossier({
         numero: form.numero_demande || `DOS-${new Date().getFullYear()}-${Math.floor(Math.random() * 10000)}`,
@@ -39,11 +39,11 @@ export default function NouveauDossier() {
         contact: form.contact,
         date_enregistrement: form.date_enregistrement,
         region: form.region,
-        prefecture: form.prefecture,
         sous_prefecture: form.sous_prefecture,
         village: form.village,
         departement: form.departement,
-        numero_cf: form.numero_cf
+        numero_cf: form.numero_cf,
+        forcedProprietaireId,
       })
       setSaved(true)
       setTimeout(() => navigate('/dossiers'), 2000)
@@ -61,7 +61,35 @@ export default function NouveauDossier() {
     }
   }
 
+  const handleSubmit = async e => {
+    e.preventDefault()
+    if (!form.demandeur.trim() || !form.contact.trim() || !form.region.trim()) {
+      setError('Les champs marqués * sont obligatoires.')
+      return
+    }
+    const existing = await findProprietaireByContact(form.contact)
+    if (existing && existing.nom_complet.trim() !== form.demandeur.trim()) {
+      setConflict({ existing, entered: form.demandeur })
+      return
+    }
+    await doCreate()
+  }
+
+  const handleConflictEcraser = async () => {
+    const saved = conflict
+    setConflict(null)
+    await updateProprietaireNom(saved.existing.id, saved.entered)
+    await doCreate(saved.existing.id)
+  }
+
+  const handleConflictGarder = async () => {
+    const saved = conflict
+    setConflict(null)
+    await doCreate(saved.existing.id)
+  }
+
   return (
+    <>
     <div className="max-w-[700px] mx-auto px-4 sm:px-6 py-8">
 
       {/* Retour */}
@@ -164,22 +192,12 @@ export default function NouveauDossier() {
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
           <Input
-            label="Préfecture"
-            name="prefecture"
-            placeholder="ex : Abidjan"
-            value={form.prefecture}
-            onChange={handleChange}
-          />
-          <Input
             label="Sous-préfecture"
             name="sous_prefecture"
             placeholder="ex : Cocody"
             value={form.sous_prefecture}
             onChange={handleChange}
           />
-        </div>
-
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
           <Input
             label="Village"
             name="village"
@@ -187,14 +205,15 @@ export default function NouveauDossier() {
             value={form.village}
             onChange={handleChange}
           />
-          <Input
-            label="Numéro du CF"
-            name="numero_cf"
-            placeholder="ex : CF-2026-0001"
-            value={form.numero_cf || ''}
-            onChange={e => setForm(f => ({ ...f, numero_cf: e.target.value }))}
-          />
         </div>
+
+        <Input
+          label="Numéro du CF"
+          name="numero_cf"
+          placeholder="ex : CF-2026-0001"
+          value={form.numero_cf || ''}
+          onChange={e => setForm(f => ({ ...f, numero_cf: e.target.value }))}
+        />
 
         <div className="flex flex-col sm:flex-row gap-3 pt-2">
           <Button 
@@ -214,5 +233,16 @@ export default function NouveauDossier() {
         </div>
       </form>
     </div>
+    {conflict && (
+      <ProprietaireConflictModal
+        existing={conflict.existing}
+        entered={conflict.entered}
+        contact={form.contact}
+        onEcraser={handleConflictEcraser}
+        onGarder={handleConflictGarder}
+        onAnnuler={() => setConflict(null)}
+      />
+    )}
+    </>
   )
 }

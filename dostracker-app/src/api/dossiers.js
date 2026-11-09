@@ -28,41 +28,51 @@ export async function getDossier(id) {
 }
 
 /**
- * POST /dossiers – Courrier crée un nouveau dossier.
- * Crée d'abord le propriétaire (ou le retrouve par contact), puis crée le dossier.
+ * Recherche un propriétaire par contact exact. Retourne l'objet ou null.
  */
-export async function createDossier({ numero, demandeur, contact, date_enregistrement, region, prefecture, sous_prefecture, village, departement, numero_cf }) {
+export async function findProprietaireByContact(contact) {
   try {
-    // Étape 1 : créer ou retrouver le propriétaire
-    let proprietaire_id
-    
-    // D'abord, essayer de retrouver le propriétaire par contact
-    try {
-      const existing = await axios.get('/api/v1/proprietaires', { params: { search: contact } })
-      const found = (existing.data || []).find(p => p.contact === contact)
-      if (found) {
-        proprietaire_id = found.id
-        console.log('Propriétaire trouvé:', proprietaire_id)
-      } else {
-        // Propriétaire non trouvé, le créer
-        const propResp = await axios.post('/api/v1/proprietaires', {
-          nom_complet: demandeur,
-          contact,
-        })
-        proprietaire_id = propResp.data.id
-        console.log('Propriétaire créé:', proprietaire_id)
+    const resp = await axios.get('/api/v1/proprietaires', { params: { search: contact } })
+    return (resp.data || []).find(p => p.contact === contact) || null
+  } catch {
+    return null
+  }
+}
+
+/** Met à jour le nom d'un propriétaire existant */
+export async function updateProprietaireNom(id, nom_complet) {
+  const resp = await axios.put(`/api/v1/proprietaires/${id}`, { nom_complet })
+  return resp.data
+}
+
+/**
+ * POST /dossiers – Courrier crée un nouveau dossier.
+ * Si forcedProprietaireId est fourni, la recherche/création du propriétaire est court-circuitée.
+ */
+export async function createDossier({ numero, demandeur, contact, date_enregistrement, region, sous_prefecture, village, departement, numero_cf, forcedProprietaireId = null }) {
+  try {
+    let proprietaire_id = forcedProprietaireId
+
+    if (!proprietaire_id) {
+      try {
+        const existing = await axios.get('/api/v1/proprietaires', { params: { search: contact } })
+        const found = (existing.data || []).find(p => p.contact === contact)
+        if (found) {
+          proprietaire_id = found.id
+        } else {
+          const propResp = await axios.post('/api/v1/proprietaires', { nom_complet: demandeur, contact })
+          proprietaire_id = propResp.data.id
+        }
+      } catch (err) {
+        throw new Error('Impossible de créer ou retrouver le propriétaire: ' + (err.response?.data?.detail || err.message))
       }
-    } catch (err) {
-      console.error('Erreur lors de la gestion du propriétaire:', err)
-      throw new Error('Impossible de créer ou retrouver le propriétaire: ' + (err.response?.data?.detail || err.message))
     }
 
-    // Étape 2 : créer le dossier avec les champs corrects
+    // Étape 2 : créer le dossier
     const response = await axios.post('/api/v1/dossiers', {
       numero_dossier: numero,
       date_enregistrement,
       region,
-      prefecture: prefecture || null,
       sous_prefecture: sous_prefecture || null,
       village: village || null,
       departement: departement || null,
@@ -79,11 +89,10 @@ export async function createDossier({ numero, demandeur, contact, date_enregistr
 /**
  * PUT /dossiers/:id/courrier – Courrier met à jour les champs de base d'un dossier
  */
-export async function updateDossier(id, { region, prefecture, sous_prefecture, village, numero_cf }) {
+export async function updateDossier(id, { region, sous_prefecture, village, numero_cf }) {
   try {
     const response = await axios.put(`/api/v1/dossiers/${id}/courrier`, {
       region: region || null,
-      prefecture: prefecture || null,
       sous_prefecture: sous_prefecture || null,
       village: village || null,
       numero_cf: numero_cf || null,

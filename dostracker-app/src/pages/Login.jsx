@@ -1,12 +1,23 @@
-import { useState } from 'react'
+import { useState, lazy, Suspense } from 'react'
 import { useNavigate, Navigate, Link } from 'react-router-dom'
-import { User, Lock, Eye, EyeOff, LogIn } from 'lucide-react'
+import { User, Lock, Eye, EyeOff, LogIn, Inbox, FileCheck2, Landmark, ChevronRight } from 'lucide-react'
+import Lottie from 'lottie-react'
+import radar from '../assets/lottie/radar-foncier.json'
 import { useAuth } from '../context/AuthContext'
 import { getDefaultRoute } from '../utils/serviceRoutes'
 import Logo from '../components/ui/Logo'
 import Alert from '../components/ui/Alert'
 import Button from '../components/ui/Button'
 import logger from '../utils/logger'
+
+// three.js chargé à la demande : ne pèse pas sur le reste de l'app
+const LandScene = lazy(() => import('../components/login/LandScene'))
+
+const STEPS = [
+  { icon: Inbox,      label: 'Courrier' },
+  { icon: FileCheck2, label: 'SPFEI' },
+  { icon: Landmark,   label: 'Conservation' },
+]
 
 export default function Login() {
   const { isAuthenticated, login } = useAuth()
@@ -69,77 +80,61 @@ export default function Login() {
 
   return (
     <div
-      className="min-h-screen flex items-center justify-center px-4 relative overflow-hidden"
-      style={{ background: 'linear-gradient(160deg, #0F1923 0%, #1C2B3A 55%, #1a3020 100%)' }}
+      className="min-h-screen flex flex-col items-center justify-center px-4 py-8 relative overflow-hidden"
+      style={{ background: 'radial-gradient(120% 90% at 50% 0%, #1C2B3A 0%, #0F1923 55%, #090E13 100%)' }}
     >
-      {/* Stripes CI */}
-      <div
-        aria-hidden
-        className="absolute top-0 right-0 bottom-0 flex opacity-[0.06]"
-        style={{ width: 160 }}
-      >
-        <div className="flex-1" style={{ background: 'var(--ci-orange)' }} />
-        <div className="flex-1 bg-white" />
-        <div className="flex-1" style={{ background: 'var(--ci-green)' }} />
-      </div>
+      {/* Fond 3D : cadastre de parcelles */}
+      <Suspense fallback={null}>
+        <LandScene />
+      </Suspense>
 
-      {/* Halos */}
-      <div aria-hidden className="absolute pointer-events-none" style={{
-        width: 500, height: 500,
-        background: 'radial-gradient(circle, rgba(244,121,32,0.13) 0%, transparent 70%)',
-        top: -130, right: -130, animation: 'pulse-glow 4s ease-in-out infinite',
-      }} />
-      <div aria-hidden className="absolute pointer-events-none" style={{
-        width: 400, height: 400,
-        background: 'radial-gradient(circle, rgba(0,133,63,0.10) 0%, transparent 70%)',
-        bottom: -80, left: -80, animation: 'pulse-glow 4s ease-in-out infinite 2s',
-      }} />
+      {/* Vignette pour garder la carte lisible */}
+      <div aria-hidden className="absolute inset-0 pointer-events-none"
+        style={{ background: 'radial-gradient(ellipse at center, rgba(9,14,19,0.55) 0%, rgba(9,14,19,0) 55%, rgba(9,14,19,0.65) 100%)' }} />
 
       {/* Carte */}
       <div
-        className="relative z-10 w-full max-w-sm bg-white rounded-xl overflow-hidden"
-        style={{ boxShadow: '0 32px 80px rgba(0,0,0,0.35)', animation: 'slideUp 0.6s ease forwards' }}
+        className="relative z-10 w-full max-w-[26rem] rounded-2xl overflow-hidden"
+        style={{
+          background: 'rgba(255,255,255,0.94)',
+          backdropFilter: 'blur(18px)',
+          WebkitBackdropFilter: 'blur(18px)',
+          border: '1px solid rgba(255,255,255,0.35)',
+          boxShadow: '0 40px 100px rgba(0,0,0,0.55), 0 0 0 1px rgba(244,121,32,0.12), 0 0 60px rgba(244,121,32,0.10)',
+          animation: 'slideUp 0.6s ease forwards',
+        }}
       >
-        {/* Bande CI */}
         <div className="ci-divider" />
 
-        <div className="px-8 pt-8 pb-10 flex flex-col gap-6">
+        <div className="px-8 pt-6 pb-9 flex flex-col gap-5">
 
-          {/* Logo */}
-          <div className="flex flex-col items-center gap-1">
+          {/* En-tête : radar Lottie + logo */}
+          <div className="flex flex-col items-center">
+            <div className="w-24 h-24 -mb-2" aria-hidden>
+              <Lottie animationData={radar} loop autoplay />
+            </div>
             <Logo size="md" dark />
-            <p className="text-[0.7rem] text-neutral-400 tracking-[0.12em] uppercase mt-1">
+            <p className="text-[0.68rem] text-neutral-400 tracking-[0.14em] uppercase mt-2">
               Système de Gestion Foncière
             </p>
           </div>
 
-          {/* Titre */}
           <div className="text-center">
-            <h1 className="font-display font-bold text-xl text-neutral-900">
-              Connexion
-            </h1>
-            <p className="text-sm text-neutral-400 mt-1">
-              Accès réservé aux agents habilités
-            </p>
+            <h1 className="font-display font-bold text-xl text-neutral-900">Connexion</h1>
+            <p className="text-sm text-neutral-400 mt-1">Accès réservé aux agents habilités</p>
           </div>
 
-          {/* Erreur */}
           {error && <Alert variant="error">{error}</Alert>}
 
-          {/* Formulaire */}
           <form onSubmit={handleSubmit} className="flex flex-col gap-4" noValidate>
-
-            {/* Username */}
             <div className="flex flex-col gap-1">
-              <label className="text-[0.78rem] font-bold text-neutral-700">
+              <label htmlFor="username" className="text-[0.78rem] font-bold text-neutral-700">
                 Nom d'utilisateur <span style={{ color: 'var(--ci-orange)' }}>*</span>
               </label>
               <div className="relative">
-                <User
-                  size={15}
-                  className="absolute left-3 top-1/2 -translate-y-1/2 text-neutral-400"
-                />
+                <User size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-neutral-400" />
                 <input
+                  id="username"
                   name="username"
                   type="text"
                   autoComplete="username"
@@ -152,25 +147,19 @@ export default function Login() {
               </div>
             </div>
 
-            {/* Password */}
             <div className="flex flex-col gap-1">
               <div className="flex justify-between items-center">
-                <label className="text-[0.78rem] font-bold text-neutral-700">
+                <label htmlFor="password" className="text-[0.78rem] font-bold text-neutral-700">
                   Mot de passe <span style={{ color: 'var(--ci-orange)' }}>*</span>
                 </label>
-                <Link 
-                  to="/forgot-password" 
-                  className="text-[0.7rem] text-neutral-500 hover:text-orange-600 transition-colors"
-                >
+                <Link to="/forgot-password" className="text-[0.7rem] text-neutral-500 hover:text-orange-600 transition-colors">
                   Mot de passe oublié ?
                 </Link>
               </div>
               <div className="relative">
-                <Lock
-                  size={15}
-                  className="absolute left-3 top-1/2 -translate-y-1/2 text-neutral-400"
-                />
+                <Lock size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-neutral-400" />
                 <input
+                  id="password"
                   name="password"
                   type={showPwd ? 'text' : 'password'}
                   autoComplete="current-password"
@@ -190,13 +179,7 @@ export default function Login() {
               </div>
             </div>
 
-            {/* Submit */}
-            <Button
-              type="submit"
-              variant="primary"
-              className="w-full justify-center mt-2"
-              disabled={loading}
-            >
+            <Button type="submit" variant="primary" className="w-full justify-center mt-2" disabled={loading}>
               {loading ? (
                 <>
                   <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
@@ -210,8 +193,20 @@ export default function Login() {
               )}
             </Button>
           </form>
-
         </div>
+      </div>
+
+      {/* Parcours d'un dossier */}
+      <div className="relative z-10 mt-6 flex items-center gap-2 text-white/70 text-[0.72rem] tracking-wide" aria-hidden>
+        {STEPS.map((step, i) => (
+          <span key={step.label} className="flex items-center gap-2">
+            <span className="flex items-center gap-1.5 rounded-full px-3 py-1"
+              style={{ background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.12)' }}>
+              <step.icon size={13} /> {step.label}
+            </span>
+            {i < STEPS.length - 1 && <ChevronRight size={13} className="text-white/30" />}
+          </span>
+        ))}
       </div>
     </div>
   )

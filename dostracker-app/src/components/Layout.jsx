@@ -1,9 +1,11 @@
-import { useState } from 'react'
+import { useState, useRef, useCallback, useEffect } from 'react'
+import { createPortal } from 'react-dom'
 import { Outlet, useNavigate } from 'react-router-dom'
 import { Menu, Bell, Settings, X, CheckCircle, AlertCircle, LogOut } from 'lucide-react'
 import Sidebar, { SIDEBAR_W } from './Sidebar'
 import { useAuth } from '../context/AuthContext'
 import { motion, AnimatePresence } from 'framer-motion'
+import { getNotifications } from '../api/notifications'
 
 /* ── Thèmes d'arrière-plan par service ── */
 const BG_THEMES = {
@@ -109,7 +111,6 @@ function ServiceBackground({ serviceId }) {
   const theme = BG_THEMES[serviceId] ?? DEFAULT_THEME
   return (
     <div aria-hidden="true" style={{ position: 'absolute', inset: 0, pointerEvents: 'none', overflow: 'hidden', zIndex: 0 }}>
-      {/* Orbes flous */}
       {theme.orbs.map((orb, i) => (
         <div key={`orb-${i}`} style={{
           position: 'absolute', left: orb.x, top: orb.y,
@@ -119,124 +120,93 @@ function ServiceBackground({ serviceId }) {
           animationDelay: orb.delay, transform: 'translate(-50%,-50%)',
         }}/>
       ))}
-      {/* Particules uniques par service */}
       {theme.particles.map((p, i) => <Particle key={`p-${i}`} p={p} />)}
     </div>
   )
 }
 
-// Données de notifications fictives pour la démo
-const MOCK_NOTIFICATIONS = [
-  { id: 1, title: 'Nouveau dossier', message: 'Un nouveau dossier a été créé', time: '5 min', read: false, type: 'info' },
-  { id: 2, title: 'Dossier non conforme', message: 'Le dossier DOS-2024-0140 a été marqué comme non conforme', time: '1 heure', read: false, type: 'warning' },
-  { id: 3, title: 'SMS envoyé', message: 'Notification envoyée au propriétaire du dossier DOS-2024-0139', time: '3 heures', read: true, type: 'success' },
-  { id: 4, title: 'Maintenance prévue', message: 'Une maintenance est prévue ce soir à 22h', time: '1 jour', read: true, type: 'info' },
-]
+function formatRelativeTime(isoStr) {
+  if (!isoStr) return ''
+  const diff = (Date.now() - new Date(isoStr)) / 1000
+  if (diff < 60) return 'À l\'instant'
+  if (diff < 3600) return `${Math.floor(diff / 60)} min`
+  if (diff < 86400) return `${Math.floor(diff / 3600)} h`
+  return `${Math.floor(diff / 86400)} j`
+}
 
 export default function Layout() {
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [notificationsOpen, setNotificationsOpen] = useState(false)
-  const [notifications, setNotifications] = useState(MOCK_NOTIFICATIONS)
+  const [notifications, setNotifications] = useState([])
+  const [dropdownPos, setDropdownPos] = useState({ top: 56, right: 16 })
+  const [clearedAt, setClearedAt] = useState(null)
+  const mobileBellRef = useRef(null)
+  const desktopBellRef = useRef(null)
   const { user } = useAuth()
   const navigate = useNavigate()
-  
-  const unreadCount = notifications.filter(n => !n.read).length
-  
-  const markAllAsRead = () => {
-    setNotifications(notifications.map(n => ({ ...n, read: true })))
+
+  // Charger le timestamp "vider" depuis localStorage dès que l'utilisateur est connu
+  useEffect(() => {
+    if (user?.id) {
+      setClearedAt(localStorage.getItem(`notif_cleared_${user.id}`))
+    }
+  }, [user?.id])
+
+  const unreadCount = notifications.filter(n => !clearedAt || (n.time && n.time > clearedAt)).length
+
+  const fetchNotifications = useCallback(async () => {
+    try {
+      const data = await getNotifications()
+      setNotifications(Array.isArray(data) ? data : [])
+    } catch {
+      // silencieux si non connecté
+    }
+  }, [])
+
+  // Chargement initial + rafraîchissement toutes les 2 minutes
+  useEffect(() => {
+    if (!user) return
+    fetchNotifications()
+    const id = setInterval(fetchNotifications, 120_000)
+    return () => clearInterval(id)
+  }, [user, fetchNotifications])
+
+  const openNotifications = (bellRef) => {
+    if (!notificationsOpen) {
+      const rect = bellRef.current?.getBoundingClientRect()
+      if (rect) {
+        setDropdownPos({ top: rect.bottom + 8, right: window.innerWidth - rect.right })
+      }
+      fetchNotifications()
+    }
+    setNotificationsOpen(v => !v)
   }
-  
+
+  const clearAll = () => {
+    const now = new Date().toISOString()
+    if (user?.id) {
+      localStorage.setItem(`notif_cleared_${user.id}`, now)
+      setClearedAt(now)
+    }
+    setNotificationsOpen(false)
+  }
+
   const goToSettings = () => {
     setNotificationsOpen(false)
     navigate('/parametres')
   }
 
-  // Composant pour le widget de notifications
-  const NotificationsWidget = () => (
-    <AnimatePresence>
-      {notificationsOpen && (
-        <motion.div 
-          initial={{ opacity: 0, y: 10, scale: 0.95 }}
-          animate={{ opacity: 1, y: 0, scale: 1 }}
-          exit={{ opacity: 0, y: 10, scale: 0.95 }}
-          transition={{ duration: 0.2 }}
-          className="absolute top-full right-0 mt-2 w-80 bg-white rounded-lg shadow-lg overflow-hidden z-50"
-          style={{ boxShadow: 'var(--shadow-lg)' }}
-        >
-          <div className="p-3 border-b border-neutral-100 flex items-center justify-between">
-            <h3 className="font-display font-bold text-sm text-neutral-800">Notifications</h3>
-            <div className="flex gap-1">
-              <button 
-                onClick={markAllAsRead}
-                className="text-xs text-neutral-500 hover:text-neutral-700 px-2 py-1 rounded hover:bg-neutral-100 transition-colors"
-              >
-                Tout marquer comme lu
-              </button>
-              <button 
-                onClick={() => setNotificationsOpen(false)}
-                className="text-neutral-400 hover:text-neutral-600 p-1 rounded-full hover:bg-neutral-100 transition-colors"
-              >
-                <X size={14} />
-              </button>
-            </div>
-          </div>
-          
-          <div className="max-h-[300px] overflow-y-auto">
-            {notifications.length > 0 ? (
-              <div className="divide-y divide-neutral-100">
-                {notifications.map(notif => (
-                  <div 
-                    key={notif.id} 
-                    className={`p-3 hover:bg-neutral-50 transition-colors cursor-pointer ${!notif.read ? 'bg-blue-50/30' : ''}`}
-                  >
-                    <div className="flex gap-3">
-                      <div className="shrink-0 mt-0.5">
-                        {notif.type === 'success' && <CheckCircle size={18} className="text-green-500" />}
-                        {notif.type === 'warning' && <AlertCircle size={18} className="text-orange-500" />}
-                        {notif.type === 'info' && <Bell size={18} className="text-blue-500" />}
-                      </div>
-                      <div>
-                        <p className="text-sm font-semibold text-neutral-800">{notif.title}</p>
-                        <p className="text-xs text-neutral-600 mt-0.5">{notif.message}</p>
-                        <p className="text-[10px] text-neutral-400 mt-1">{notif.time}</p>
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <div className="py-8 text-center text-neutral-400">
-                <p className="text-sm">Aucune notification</p>
-              </div>
-            )}
-          </div>
-          
-          <div className="p-2 border-t border-neutral-100 bg-neutral-50">
-            <button 
-              onClick={goToSettings}
-              className="w-full text-xs text-neutral-600 py-2 rounded hover:bg-neutral-100 transition-colors flex items-center justify-center gap-1"
-            >
-              <Settings size={12} />
-              Paramètres de notifications
-            </button>
-          </div>
-        </motion.div>
-      )}
-    </AnimatePresence>
-  )
-
   return (
     <div className="min-h-screen bg-[#F0F4F8]">
       <Sidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} />
 
-      {/* Contenu principal décalé à droite sur desktop */}
       <div
         className="min-h-screen flex flex-col transition-all duration-300 w-full"
         style={{ marginLeft: 0 }}
       >
         {/* Topbar mobile */}
         <header
-          className="md:hidden fixed top-0 left-0 right-0 z-20 flex items-center justify-between px-4 h-14 bg-white"
+          className="md:hidden fixed top-0 left-0 right-0 z-30 flex items-center justify-between px-4 h-14 bg-white"
           style={{ borderBottom: '1px solid var(--neutral-200)', boxShadow: 'var(--shadow-sm)' }}
         >
           <button
@@ -253,24 +223,24 @@ export default function Layout() {
 
           <div className="relative">
             <button
+              ref={mobileBellRef}
               className="w-9 h-9 flex items-center justify-center rounded-full text-neutral-500 hover:bg-neutral-100 transition-colors"
               aria-label="Notifications"
-              onClick={() => setNotificationsOpen(!notificationsOpen)}
+              onClick={() => openNotifications(mobileBellRef)}
             >
               <Bell size={18} />
               {unreadCount > 0 && (
                 <span className="absolute top-0 right-0 w-4 h-4 bg-red-500 rounded-full text-[10px] text-white flex items-center justify-center">
-                  {unreadCount}
+                  {unreadCount > 9 ? '9+' : unreadCount}
                 </span>
               )}
             </button>
-            <NotificationsWidget />
           </div>
         </header>
 
-        {/* Topbar desktop (après sidebar) */}
+        {/* Topbar desktop */}
         <header
-          className={`hidden md:flex fixed top-0 right-0 z-10 h-14 items-center justify-between px-6 bg-white`}
+          className="hidden md:flex fixed top-0 right-0 z-30 h-14 items-center justify-between px-6 bg-white"
           style={{
             left: SIDEBAR_W,
             borderBottom: '1px solid var(--neutral-200)',
@@ -282,18 +252,18 @@ export default function Layout() {
           </p>
           <div className="relative">
             <button
+              ref={desktopBellRef}
               className="w-9 h-9 flex items-center justify-center rounded-full text-neutral-500 hover:bg-neutral-100 transition-colors"
               aria-label="Notifications"
-              onClick={() => setNotificationsOpen(!notificationsOpen)}
+              onClick={() => openNotifications(desktopBellRef)}
             >
               <Bell size={18} />
               {unreadCount > 0 && (
                 <span className="absolute top-0 right-0 w-4 h-4 bg-red-500 rounded-full text-[10px] text-white flex items-center justify-center">
-                  {unreadCount}
+                  {unreadCount > 9 ? '9+' : unreadCount}
                 </span>
               )}
             </button>
-            <NotificationsWidget />
           </div>
         </header>
 
@@ -308,6 +278,109 @@ export default function Layout() {
           </div>
         </main>
       </div>
+
+      {/* ── Dropdown notifications via portal (hors de tout contexte d'empilement) ── */}
+      {createPortal(
+        <AnimatePresence>
+          {notificationsOpen && (
+            <>
+              {/* Fond transparent pour fermer au clic extérieur */}
+              <motion.div
+                key="notif-overlay"
+                className="fixed inset-0"
+                style={{ zIndex: 1100 }}
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                onClick={() => setNotificationsOpen(false)}
+              />
+
+              {/* Panneau dropdown */}
+              <motion.div
+                key="notif-panel"
+                initial={{ opacity: 0, y: 8, scale: 0.97 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, y: 8, scale: 0.97 }}
+                transition={{ duration: 0.15 }}
+                style={{
+                  position: 'fixed',
+                  top: dropdownPos.top,
+                  right: dropdownPos.right,
+                  width: 320,
+                  zIndex: 1101,
+                  boxShadow: '0 8px 32px rgba(0,0,0,0.16)',
+                  borderRadius: 12,
+                  overflow: 'hidden',
+                  background: '#fff',
+                }}
+              >
+                {/* En-tête */}
+                <div className="px-4 py-3 border-b border-neutral-100 flex items-center justify-between">
+                  <h3 className="font-display font-bold text-sm text-neutral-800">Notifications</h3>
+                  <div className="flex gap-1 items-center">
+                    {notifications.length > 0 && (
+                      <button
+                        onClick={clearAll}
+                        className="text-xs text-neutral-500 hover:text-red-500 px-2 py-1 rounded hover:bg-red-50 transition-colors"
+                      >
+                        Vider
+                      </button>
+                    )}
+                    <button
+                      onClick={() => setNotificationsOpen(false)}
+                      className="text-neutral-400 hover:text-neutral-600 p-1 rounded-full hover:bg-neutral-100 transition-colors"
+                    >
+                      <X size={14} />
+                    </button>
+                  </div>
+                </div>
+
+                {/* Liste */}
+                <div className="max-h-72 overflow-y-auto divide-y divide-neutral-100">
+                  {notifications.length === 0 ? (
+                    <div className="py-10 text-center text-neutral-400">
+                      <Bell size={28} className="mx-auto mb-2 opacity-30" />
+                      <p className="text-sm">Aucune notification</p>
+                    </div>
+                  ) : (
+                    notifications.map(n => {
+                      const isNew = !clearedAt || (n.time && n.time > clearedAt)
+                      return (
+                        <div
+                          key={n.id}
+                          className={`flex gap-3 px-4 py-3 hover:bg-neutral-50 transition-colors ${isNew ? 'bg-orange-50/40' : ''}`}
+                        >
+                          <div className="shrink-0 mt-0.5">
+                            {n.type === 'success' && <CheckCircle size={17} className="text-green-500" />}
+                            {n.type === 'warning' && <AlertCircle size={17} className="text-orange-500" />}
+                            {(n.type === 'info' || !n.type) && <Bell size={17} className="text-blue-400" />}
+                          </div>
+                          <div className="min-w-0">
+                            <p className="text-sm font-semibold text-neutral-800 truncate">{n.title}</p>
+                            <p className="text-xs text-neutral-500 mt-0.5 line-clamp-2">{n.message}</p>
+                            <p className="text-[10px] text-neutral-400 mt-1">{formatRelativeTime(n.time)}</p>
+                          </div>
+                        </div>
+                      )
+                    })
+                  )}
+                </div>
+
+                {/* Pied */}
+                <div className="px-4 py-2 border-t border-neutral-100 bg-neutral-50">
+                  <button
+                    onClick={goToSettings}
+                    className="w-full text-xs text-neutral-500 py-1.5 rounded hover:bg-neutral-100 transition-colors flex items-center justify-center gap-1"
+                  >
+                    <Settings size={11} /> Paramètres de notifications
+                  </button>
+                </div>
+              </motion.div>
+            </>
+          )}
+        </AnimatePresence>,
+        document.body
+      )}
     </div>
   )
 }

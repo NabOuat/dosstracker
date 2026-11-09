@@ -138,8 +138,8 @@ export default function SpfeiAdmin() {
               <label className="text-[0.78rem] font-bold text-neutral-700">Type CF <span style={{ color: 'var(--ci-orange)' }}>*</span></label>
               <select name="type_cf" required value={form.type_cf} onChange={handleChange} className="input-field">
                 <option value="">Sélectionner…</option>
-                <option value="Rural">Rural</option>
-                <option value="Urbain">Urbain</option>
+                <option value="CFC">Certificat Foncier Collectif</option>
+                <option value="CFI">Certificat Foncier Individuel</option>
               </select>
             </div>
             <Input label="Date enquête officielle"           name="date_enquete_officielle" value={form.date_enquete_officielle} onChange={handleChange} type="date" required />

@@ -40,3 +40,10 @@ export async function deletePieceJointe(pieceId) {
     throw error
   }
 }
+
+/** GET /pieces-jointes/{piece_id}/download – URL signée (5 min) puis ouverture du fichier */
+export async function downloadPieceJointe(pieceId) {
+  const response = await axios.get(`/api/v1/pieces-jointes/${pieceId}/download`)
+  window.open(response.data.url, '_blank', 'noopener')
+  return response.data
+}

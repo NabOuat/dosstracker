@@ -1,4 +1,5 @@
 import { useState, useMemo, useEffect } from 'react'
+import { createPortal } from 'react-dom'
 import {
   Search, Filter, Plus, Download, Send,
   CheckSquare, Square, X, ChevronDown
@@ -92,24 +93,28 @@ export default function Dossiers() {
       selectedDossiers.length === filtered.length ? [] : filtered.map(d => d.id)
     )
 
+  const nbEnvoyables = selectedDossiers.filter(id => dossiers.find(x => x.id === id)?.statut === 'COURRIER').length
+
   const handleEnvoyerAuSpfei = async () => {
     if (selectedDossiers.length === 0) return
-    
+
+    const eligibles = selectedDossiers.filter(id => {
+      const d = dossiers.find(x => x.id === id)
+      return d?.statut === 'COURRIER'
+    })
+
+    if (eligibles.length === 0) {
+      showNotification('❌ Seuls les dossiers en statut COURRIER peuvent être envoyés au SPFEI', 'error')
+      return
+    }
+
     try {
-      // Envoyer chaque dossier sélectionné au SPFEI
-      for (const dossierId of selectedDossiers) {
-        const dossier = filtered.find(d => d.id === dossierId)
-        if (dossier) {
-          console.log('Envoi du dossier au SPFEI:', dossier.numero_dossier)
-          await envoyerAuSpfei(dossierId)
-        }
+      for (const dossierId of eligibles) {
+        await envoyerAuSpfei(dossierId)
       }
-      // Réinitialiser la sélection après l'envoi
-      const count = selectedDossiers.length
       setSelectedDossiers([])
-      // Recharger les dossiers pour voir les changements
       await getDossiers().then(data => setDossiers(data || []))
-      showNotification(`✅ ${count} dossier(s) envoyé(s) au SPFEI avec succès`, 'success')
+      showNotification(`✅ ${eligibles.length} dossier(s) envoyé(s) au SPFEI avec succès`, 'success')
     } catch (err) {
       console.error('Erreur lors de l\'envoi:', err)
       showNotification(`❌ Erreur lors de l'envoi: ${err.response?.data?.detail || err.message}`, 'error')
@@ -119,6 +124,7 @@ export default function Dossiers() {
   const hasActiveFilter = filters.search || filters.statut
 
   return (
+    <>
     <motion.div
       initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.25 }}
       className="page"
@@ -300,13 +306,14 @@ export default function Dossiers() {
             </div>
 
             <button
-              disabled={selectedDossiers.length === 0}
+              disabled={nbEnvoyables === 0}
+              title={nbEnvoyables === 0 ? 'Seuls les dossiers au statut COURRIER peuvent être envoyés au SPFEI' : undefined}
               className="btn btn-primary btn-sm"
               style={{ borderRadius: 8 }}
               onClick={handleEnvoyerAuSpfei}
             >
               <Send size={13} />
-              Envoyer ({selectedDossiers.length})
+              Envoyer ({nbEnvoyables})
             </button>
           </div>
         </div>
@@ -465,32 +472,43 @@ export default function Dossiers() {
           onClose={() => setSelectedDossier(null)} 
         />
 
-        {/* Notification animée */}
-        <AnimatePresence>
-          {notification && (
-            <motion.div
-              initial={{ opacity: 0, y: -20, scale: 0.95 }}
-              animate={{ opacity: 1, y: 0, scale: 1 }}
-              exit={{ opacity: 0, y: -20, scale: 0.95 }}
-              transition={{ duration: 0.3, type: 'spring', stiffness: 300 }}
-              className="fixed top-6 right-6 z-50 p-4 rounded-lg max-w-sm"
-              style={{
-                background: notification.type === 'success' ? '#F0FDF4' : '#FEE2E2',
-                border: `1px solid ${notification.type === 'success' ? '#BBF7D0' : '#FECACA'}`,
-                boxShadow: '0 10px 25px rgba(0,0,0,0.1)'
-              }}
-            >
-              <p style={{ 
-                color: notification.type === 'success' ? '#166534' : '#991B1B',
-                fontWeight: '600',
-                fontSize: '0.95rem'
-              }}>
-                {notification.message}
-              </p>
-            </motion.div>
-          )}
-        </AnimatePresence>
       </div>
     </motion.div>
+
+    {createPortal(
+      <AnimatePresence>
+        {notification && (
+          <motion.div
+            initial={{ opacity: 0, y: -20, scale: 0.95 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: -20, scale: 0.95 }}
+            transition={{ duration: 0.3, type: 'spring', stiffness: 300 }}
+            style={{
+              position: 'fixed',
+              top: 72, // sous le header (h-14 = 56px)
+              right: 24,
+              zIndex: 9999,
+              padding: '14px 18px',
+              borderRadius: 10,
+              maxWidth: 380,
+              background: notification.type === 'success' ? '#F0FDF4' : '#FEE2E2',
+              border: `1px solid ${notification.type === 'success' ? '#BBF7D0' : '#FECACA'}`,
+              boxShadow: '0 10px 25px rgba(0,0,0,0.1)',
+            }}
+          >
+            <p style={{
+              color: notification.type === 'success' ? '#166534' : '#991B1B',
+              fontWeight: '600',
+              fontSize: '0.95rem',
+              margin: 0,
+            }}>
+              {notification.message}
+            </p>
+          </motion.div>
+        )}
+      </AnimatePresence>,
+      document.body
+    )}
+    </>
   )
 }
